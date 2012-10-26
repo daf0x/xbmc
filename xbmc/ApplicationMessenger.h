@@ -204,7 +204,7 @@ public:
   void InhibitIdleShutdown(bool inhibit);
   void SwitchToFullscreen(); //
   void Minimize(bool wait = false);
-  void ExecOS(const CStdString command, bool waitExit = false);
+  void ExecOS(const std::vector<CStdString>& params, bool waitExit = false);
   void UserEvent(int code);
   //! \brief Set the tag for the currently playing song
   void SetCurrentSongTag(const MUSIC_INFO::CMusicInfoTag& tag);

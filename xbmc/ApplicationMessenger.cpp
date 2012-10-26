@@ -546,9 +546,9 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
         CLog::Log(LOGNOTICE, "%s: Failed to suspend AudioEngine before launching external program",__FUNCTION__);
       }
 #if defined( _LINUX) && !defined(TARGET_DARWIN)
-      CUtil::RunCommandLine(pMsg->strParam.c_str(), (pMsg->dwParam1 == 1));
+      CUtil::Command(pMsg->params, (pMsg->dwParam1 == 1));
 #elif defined(_WIN32)
-      CWIN32Util::XBMCShellExecute(pMsg->strParam.c_str(), (pMsg->dwParam1 == 1));
+      CWIN32Util::XBMCShellExecute(pMsg->params[0].c_str(), (pMsg->dwParam1 == 1));
 #endif
       /* Resume AE processing of XBMC native audio */
       if (!CAEFactory::Resume())
@@ -721,7 +721,7 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
             g_application.OnAction(*action);
           else
           {
-            CGUIWindow *pWindow = g_windowManager.GetWindow(pMsg->dwParam1);  
+            CGUIWindow *pWindow = g_windowManager.GetWindow(pMsg->dwParam1);
             if (pWindow)
               pWindow->OnAction(*action);
             else
@@ -1182,10 +1182,9 @@ void CApplicationMessenger::DoModal(CGUIDialog *pDialog, int iWindowID, const CS
   SendMessage(tMsg, true);
 }
 
-void CApplicationMessenger::ExecOS(const CStdString command, bool waitExit)
-{
+void CApplicationMessenger::ExecOS(const vector<CStdString> &params, bool waitExit) {
   ThreadMessage tMsg = {TMSG_EXECUTE_OS};
-  tMsg.strParam = command;
+  tMsg.params = params;
   tMsg.dwParam1 = (unsigned int)waitExit;
   SendMessage(tMsg, false);
 }

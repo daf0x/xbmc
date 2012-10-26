@@ -442,12 +442,12 @@ int CBuiltins::Execute(const CStdString& execString)
   else if (execute.Equals("system.exec"))
   {
     CApplicationMessenger::Get().Minimize();
-    CApplicationMessenger::Get().ExecOS(parameter, false);
+    CApplicationMessenger::Get().ExecOS(params, false);
   }
   else if (execute.Equals("system.execwait"))
   {
     CApplicationMessenger::Get().Minimize();
-    CApplicationMessenger::Get().ExecOS(parameter, true);
+    CApplicationMessenger::Get().ExecOS(params, true);
   }
   else if (execute.Equals("resolution"))
   {
