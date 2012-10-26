@@ -1633,8 +1633,8 @@ bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
     close(0);
     close(1);
     close(2);
-    char **args = (char **)alloca(sizeof(char *) * (arrArgs.size() + 3));
-    memset(args, 0, (sizeof(char *) * (arrArgs.size() + 3)));
+    char **args = (char **)alloca(sizeof(char *) * (arrArgs.size() + 1));
+    memset(args, 0, (sizeof(char *) * (arrArgs.size() + 1)));
     for (size_t i=0; i<arrArgs.size(); i++)
       args[i] = (char *)arrArgs[i].c_str();
     if (-1 == execvp(args[0], args))
