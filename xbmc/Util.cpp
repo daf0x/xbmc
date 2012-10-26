@@ -1612,6 +1612,11 @@ bool CUtil::RunCommandLine(const CStdString& cmdLine, bool waitExit)
 //
 bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
 {
+  if (arrArgs.size() == 0)
+  {
+     // This function cannot succeed unless there is something execute
+     return false;
+  }
 #ifdef _DEBUG
   printf("Executing: ");
   for (size_t i=0; i<arrArgs.size(); i++)
@@ -1626,14 +1631,11 @@ bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
     close(0);
     close(1);
     close(2);
-    if (arrArgs.size() > 0)
-    {
-      char **args = (char **)alloca(sizeof(char *) * (arrArgs.size() + 3));
-      memset(args, 0, (sizeof(char *) * (arrArgs.size() + 3)));
-      for (size_t i=0; i<arrArgs.size(); i++)
-        args[i] = (char *)arrArgs[i].c_str();
-      execvp(args[0], args);
-    }
+    char **args = (char **)alloca(sizeof(char *) * (arrArgs.size() + 3));
+    memset(args, 0, (sizeof(char *) * (arrArgs.size() + 3)));
+    for (size_t i=0; i<arrArgs.size(); i++)
+      args[i] = (char *)arrArgs[i].c_str();
+    execvp(args[0], args);
   }
   else
   {
