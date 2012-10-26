@@ -1637,7 +1637,11 @@ bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
     memset(args, 0, (sizeof(char *) * (arrArgs.size() + 3)));
     for (size_t i=0; i<arrArgs.size(); i++)
       args[i] = (char *)arrArgs[i].c_str();
-    execvp(args[0], args);
+    if (-1 == execvp(args[0], args))
+    {
+      CLog::Log(LOGERROR, "%s: failed to execvp: %s", __FUNCTION__, strerror(errno));
+      _exit(EXIT_FAILURE);
+    }
   }
   else
   {
