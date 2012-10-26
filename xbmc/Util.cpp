@@ -1621,9 +1621,14 @@ bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
   for (size_t i=0; i<arrArgs.size(); i++)
     CLog::Log(LOGDEBUG, "%s: Arg #%ld: %s", __FUNCTION__, i, arrArgs[i].c_str());
 
-  pid_t child = fork();
   int n = 0;
-  if (child == 0)
+  pid_t child;
+  if (-1 == (child = fork()))
+  {
+    CLog::Log(LOGERROR, "%s: failed to fork: %s", __FUNCTION__, strerror(errno));
+    return false;
+  }
+  else if (child == 0)
   {
     close(0);
     close(1);
