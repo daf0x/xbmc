@@ -1617,12 +1617,9 @@ bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
      // This function cannot succeed unless there is something execute
      return false;
   }
-#ifdef _DEBUG
-  printf("Executing: ");
+  CLog::Log(LOGDEBUG, "%s: Executing:", __FUNCTION__);
   for (size_t i=0; i<arrArgs.size(); i++)
-    printf("%s ", arrArgs[i].c_str());
-  printf("\n");
-#endif
+    CLog::Log(LOGDEBUG, "%s: Arg #%ld: %s", __FUNCTION__, i, arrArgs[i].c_str());
 
   pid_t child = fork();
   int n = 0;
