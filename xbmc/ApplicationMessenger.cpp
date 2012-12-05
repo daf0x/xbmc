@@ -168,14 +168,7 @@ void CApplicationMessenger::SendMessage(ThreadMessage& message, bool wait)
     return;
   }
 
-  ThreadMessage* msg = new ThreadMessage();
-  msg->dwMessage = message.dwMessage;
-  msg->dwParam1 = message.dwParam1;
-  msg->dwParam2 = message.dwParam2;
-  msg->waitEvent = message.waitEvent;
-  msg->lpVoid = message.lpVoid;
-  msg->strParam = message.strParam;
-  msg->params = message.params;
+  ThreadMessage* msg = new ThreadMessage(message);
 
   if (msg->dwMessage == TMSG_DIALOG_DOMODAL)
     m_vecWindowMessages.push(msg);
