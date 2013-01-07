@@ -41,6 +41,7 @@ SRCS=AlarmClock.cpp \
      Mime.cpp \
      PerformanceSample.cpp \
      PerformanceStats.cpp \
+     PIDWatcher.cpp \
      POUtils.cpp \
      RecentlyAddedJob.cpp \
      RegExp.cpp \
