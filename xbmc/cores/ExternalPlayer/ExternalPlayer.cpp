@@ -458,7 +458,9 @@ BOOL CExternalPlayer::ExecuteAppLinux(const char* strSwitches)
   g_RemoteControl.setUsed(false);
 #endif
 
-  int ret = system(strSwitches);
+  int ret = 0;
+  //ret = system(strSwitches);
+  pidWatcher = CApplicationMessenger::Get().ExecOS(params);
 
 #ifdef HAS_LIRC
   g_RemoteControl.setUsed(remoteused);

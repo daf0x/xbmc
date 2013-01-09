@@ -539,7 +539,8 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
         CLog::Log(LOGNOTICE, "%s: Failed to suspend AudioEngine before launching external program",__FUNCTION__);
       }
 #if defined( _LINUX) && !defined(TARGET_DARWIN)
-      CUtil::Command(pMsg->params, (pMsg->dwParam1 == 1));
+      assert( pMsg->pidWatcher.get() != 0 );
+      CUtil::Command(pMsg->params, pMsg->pidWatcher);
 #elif defined(_WIN32)
       CWIN32Util::XBMCShellExecute(pMsg->params[0].c_str(), (pMsg->dwParam1 == 1));
 #endif
@@ -1175,11 +1176,17 @@ void CApplicationMessenger::DoModal(CGUIDialog *pDialog, int iWindowID, const CS
   SendMessage(tMsg, true);
 }
 
-void CApplicationMessenger::ExecOS(const vector<CStdString> &params, bool waitExit) {
+boost::shared_ptr<PIDWatcher> CApplicationMessenger::ExecOS(const vector<CStdString> &params) {
+  boost::shared_ptr<PIDWatcher> pidWatcher(new PIDWatcher());
   ThreadMessage tMsg = {TMSG_EXECUTE_OS};
   tMsg.params = params;
+  tMsg.pidWatcher = pidWatcher;
+  assert( pidWatcher.get() != 0 );
+  #if defined(_WIN32)
   tMsg.dwParam1 = (unsigned int)waitExit;
+  #endif
   SendMessage(tMsg, false);
+  return pidWatcher;
 }
 
 void CApplicationMessenger::UserEvent(int code)

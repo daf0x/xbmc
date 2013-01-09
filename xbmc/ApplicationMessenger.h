@@ -27,6 +27,8 @@
 #include "threads/Event.h"
 #include <boost/shared_ptr.hpp>
 
+#include "PlatformDefs.h"
+#include "utils/PIDWatcher.h"
 #include <queue>
 #include "utils/GlobalsHandling.h"
 
@@ -120,6 +122,7 @@ typedef struct
   CStdString strParam;
   std::vector<CStdString> params;
   boost::shared_ptr<CEvent> waitEvent;
+  boost::shared_ptr<PIDWatcher> pidWatcher;
   void* lpVoid;
 }
 ThreadMessage;
@@ -183,7 +186,7 @@ public:
   void PlayListPlayerClear(int playlist);
   void PlayListPlayerShuffle(int playlist, bool shuffle);
   void PlayListPlayerGetItems(int playlist, CFileItemList &list);
-  void PlayListPlayerInsert(int playlist, const CFileItem &item, int position); 
+  void PlayListPlayerInsert(int playlist, const CFileItem &item, int position);
   void PlayListPlayerInsert(int playlist, const CFileItemList &list, int position);
   void PlayListPlayerRemove(int playlist, int position);
   void PlayListPlayerSwap(int playlist, int indexItem1, int indexItem2);
@@ -204,7 +207,7 @@ public:
   void InhibitIdleShutdown(bool inhibit);
   void SwitchToFullscreen(); //
   void Minimize(bool wait = false);
-  void ExecOS(const std::vector<CStdString>& params, bool waitExit = false);
+  boost::shared_ptr<PIDWatcher> ExecOS(const std::vector<CStdString>& params);
   void UserEvent(int code);
   //! \brief Set the tag for the currently playing song
   void SetCurrentSongTag(const MUSIC_INFO::CMusicInfoTag& tag);
@@ -265,5 +268,3 @@ private:
 
 XBMC_GLOBAL_REF(CApplicationMessenger,s_messenger);
 #define s_messenger XBMC_GLOBAL_USE(CApplicationMessenger)
-
-

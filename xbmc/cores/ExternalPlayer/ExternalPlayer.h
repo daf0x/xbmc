@@ -22,6 +22,9 @@
 
 #include "cores/IPlayer.h"
 #include "threads/Thread.h"
+#include "utils/PIDWatcher.h"
+#include <boost/shared_ptr.hpp>
+#include <vector>
 
 class CGUIDialogOK;
 
@@ -96,6 +99,7 @@ private:
   bool m_bIsPlaying;
   bool m_paused;
   int64_t m_playbackStartTime;
+  boost::shared_ptr<PIDWatcher> pidWatcher; // Watcher object for the external player process
   int m_speed;
   int m_totalTime;
   int m_time;

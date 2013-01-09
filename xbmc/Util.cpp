@@ -1605,48 +1605,58 @@ bool CUtil::RunCommandLine(const CStdString& cmdLine, bool waitExit)
     }
   }
 
-  return Command(args, waitExit);
+  boost::shared_ptr<PIDWatcher> pidWatcher(new PIDWatcher());
+  Command(args, pidWatcher);
+  if(waitExit) {
+    return pidWatcher->success();
+  }
+  return true;
 }
 
-bool CUtil::Command(const CStdStringArray& arrArgs, bool waitExit)
+void CUtil::Command(const CStdStringArray& arrArgs, boost::shared_ptr<PIDWatcher> pidWatcher)
 {
-  if (arrArgs.size() == 0)
-  {
-     // This function cannot succeed unless there is something execute
-     return false;
-  }
-  CLog::Log(LOGDEBUG, "%s: Executing:", __FUNCTION__);
-  for (size_t i=0; i<arrArgs.size(); i++)
-    CLog::Log(LOGDEBUG, "%s: Arg #%ld: %s", __FUNCTION__, i, arrArgs[i].c_str());
-
-  int n = 0;
-  pid_t child;
-  if (-1 == (child = fork()))
-  {
-    CLog::Log(LOGERROR, "%s: failed to fork: %s", __FUNCTION__, strerror(errno));
-    return false;
-  }
-  else if (child == 0)
-  {
-    close(0);
-    close(1);
-    close(2);
-    char **args = (char **)alloca(sizeof(char *) * (arrArgs.size() + 1));
-    memset(args, 0, (sizeof(char *) * (arrArgs.size() + 1)));
-    for (size_t i=0; i<arrArgs.size(); i++)
-      args[i] = (char *)arrArgs[i].c_str();
-    if (-1 == execvp(args[0], args))
+  try {
+    if (arrArgs.size() == 0)
     {
-      CLog::Log(LOGERROR, "%s: failed to execvp: %s", __FUNCTION__, strerror(errno));
-      _exit(EXIT_FAILURE);
+       // This function cannot succeed unless there is something execute
+       CLog::Log(LOGERROR, "%s: called without arguments!", __FUNCTION__);
+       throw std::runtime_error(CStdString() + __FUNCTION__ + ": Missing an executable to run.");
     }
-  }
-  else
-  {
-    if (waitExit) waitpid(child, &n, 0);
-  }
 
-  return (waitExit) ? (WEXITSTATUS(n) == 0) : true;
+    CLog::Log(LOGDEBUG, "%s: Executing:", __FUNCTION__);
+    for (size_t i=0; i<arrArgs.size(); i++)
+      CLog::Log(LOGDEBUG, "%s: Arg #%ld: %s", __FUNCTION__, i, arrArgs[i].c_str());
+
+    pid_t child;
+    if (-1 == (child = fork()))
+    {
+      CLog::Log(LOGERROR, "%s: failed to fork: %s", __FUNCTION__, strerror(errno));
+      pidWatcher->reset();
+      throw std::runtime_error(CStdString() + __FUNCTION__ + ": failed to fork: " + strerror(errno));
+    }
+    else if (child == 0)
+    {
+      //close(0); // This confuses mplayer greatly. Don't do it!
+      close(1);
+      close(2);
+      char **args = (char **)alloca(sizeof(char *) * (arrArgs.size() + 1));
+      memset(args, 0, (sizeof(char *) * (arrArgs.size() + 1)));
+      for (size_t i=0; i<arrArgs.size(); i++)
+        args[i] = (char *)arrArgs[i].c_str();
+      if (-1 == execvp(args[0], args))
+      {
+        CLog::Log(LOGERROR, "%s: failed to execvp: %s", __FUNCTION__, strerror(errno));
+        _exit(EXIT_FAILURE);
+      }
+      /* Execution never reaches this point */
+    }
+
+    pidWatcher->set_pid(child);
+  }
+  catch(const std::exception& e) {
+    pidWatcher->reset();
+    throw;
+  }
 }
 
 bool CUtil::SudoCommand(const CStdString &strCommand)
@@ -1664,7 +1674,10 @@ bool CUtil::SudoCommand(const CStdString &strCommand)
   close(0); // close stdin to avoid sudo request password
   close(1);
   close(2);
-  return Command(params, true);
+
+  boost::shared_ptr<PIDWatcher> pidWatcher(new PIDWatcher());
+  Command(params, pidWatcher);
+  return pidWatcher->success();
 }
 #endif
 

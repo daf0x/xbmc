@@ -24,7 +24,9 @@
 #include <vector>
 #include <string.h>
 #include <stdint.h>
+#include <boost/shared_ptr.hpp>
 
+#include "utils/PIDWatcher.h"
 #include "MediaSource.h"
 
 // A list of filesystem types for LegalPath/FileName
@@ -186,7 +188,7 @@ public:
   //
   // Forks to execute a shell command.
   //
-  static bool Command(const CStdStringArray& arrArgs, bool waitExit = false);
+  static void Command(const CStdStringArray& arrArgs, boost::shared_ptr<PIDWatcher> pidWatcher);
 
   //
   // Forks to execute an unparsed shell command line.
@@ -208,5 +210,3 @@ private:
   static unsigned int s_randomSeed;
 #endif
 };
-
-
