@@ -73,7 +73,6 @@ CExternalPlayer::CExternalPlayer(IPlayerCallback& callback)
       CThread("CExternalPlayer")
 {
   m_bAbortRequest = false;
-  m_bIsPlaying = false;
   m_paused = false;
   m_playbackStartTime = 0;
   m_speed = 1;
@@ -103,7 +102,6 @@ bool CExternalPlayer::OpenFile(const CFileItem& file, const CPlayerOptions &opti
 {
   try
   {
-    m_bIsPlaying = true;
     CStdString filepath = file.GetPath();
     CLog::Log(LOGNOTICE, "%s: %s", __FUNCTION__, filepath.c_str());
     Create();
@@ -208,7 +206,6 @@ bool CExternalPlayer::OpenFile(const CFileItem& file, const CPlayerOptions &opti
   }
   catch(...)
   {
-    m_bIsPlaying = false;
     CLog::Log(LOGERROR,"%s - Exception thrown", __FUNCTION__);
     return false;
   }
@@ -221,7 +218,7 @@ bool CExternalPlayer::CloseFile()
   if (m_dialog && m_dialog->IsActive()) m_dialog->Close();
 
 #if defined(_WIN32)
-  if (m_bIsPlaying && m_processInfo.hProcess)
+  if (pidWatcher->running() && m_processInfo.hProcess)
   {
     TerminateProcess(m_processInfo.hProcess, 1);
   }
@@ -231,7 +228,7 @@ bool CExternalPlayer::CloseFile()
 
 bool CExternalPlayer::IsPlaying() const
 {
-  return m_bIsPlaying;
+  return pidWatcher->running();
 }
 
 void CExternalPlayer::Process()

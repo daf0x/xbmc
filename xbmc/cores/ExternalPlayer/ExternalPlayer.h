@@ -98,7 +98,6 @@ private:
   virtual void Process();
 
   bool m_bAbortRequest;
-  bool m_bIsPlaying;
   bool m_paused;
   int64_t m_playbackStartTime;
   boost::shared_ptr<PIDWatcher> pidWatcher; // Watcher object for the external player process
