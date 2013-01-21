@@ -104,7 +104,6 @@ bool CExternalPlayer::OpenFile(const CFileItem& file, const CPlayerOptions &opti
   {
     CStdString filepath = file.GetPath();
     CLog::Log(LOGNOTICE, "%s: %s", __FUNCTION__, filepath.c_str());
-    Create();
 
     CStdString archiveContent = "";
     bool play_from_archive = m_player_args.find("{0}") == std::string::npos;
@@ -201,6 +200,9 @@ bool CExternalPlayer::OpenFile(const CFileItem& file, const CPlayerOptions &opti
 #elif defined(_LINUX) || defined(TARGET_DARWIN_OSX)
   ret = ExecuteAppLinux(params);
 #endif
+
+	// Finnaly spawn Process()ing thread
+	Create();
 
     return ret;
   }
