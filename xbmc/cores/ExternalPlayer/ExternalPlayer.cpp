@@ -225,6 +225,33 @@ bool CExternalPlayer::CloseFile()
     TerminateProcess(m_processInfo.hProcess, 1);
   }
 #endif
+
+  pidWatcher->terminate();
+  // wait for external process to really die (should not take long now that
+  // we've told it to quit). This is needed in order to safely resume audio.
+  // XXX: We may not have to wait for it here, pidWatcher->running() is polled
+  //      from diffferent thread in process()
+  pidWatcher->wait();
+
+  // XXX: This ret may have stood for the successful launching of the app,
+  //      rather than it successfully quitting. Check usage.
+  BOOL ret = pidWatcher->success();
+
+  /* Resume AE processing of XBMC native audio */
+  if (!CAEFactory::Resume())
+  {
+    CLog::Log(LOGFATAL, __FUNCTION__, "Failed to restart AudioEngine after return from external player");
+  }
+
+  // We don't want to come back to an active screensaver
+  g_application.ResetScreenSaver();
+  g_application.WakeUpScreenSaverAndDPMS();
+
+  if (!ret || (m_playOneStackItem && g_application.CurrentFileItem().IsStack()))
+    m_callback.OnPlayBackStopped();
+  else
+    m_callback.OnPlayBackEnded();
+
   return true;
 }
 
@@ -291,20 +318,6 @@ void CExternalPlayer::Process()
 //  }
 //#endif
 //
-//  /* Resume AE processing of XBMC native audio */
-//  if (!CAEFactory::Resume())
-//  {
-//    CLog::Log(LOGFATAL, __FUNCTION__, "Failed to restart AudioEngine after return from external player");
-//  }
-//
-//  // We don't want to come back to an active screensaver
-//  g_application.ResetScreenSaver();
-//  g_application.WakeUpScreenSaverAndDPMS();
-//
-//  if (!ret || (m_playOneStackItem && g_application.CurrentFileItem().IsStack()))
-//    m_callback.OnPlayBackStopped();
-//  else
-//    m_callback.OnPlayBackEnded();
 }
 
 #if defined(_WIN32)
