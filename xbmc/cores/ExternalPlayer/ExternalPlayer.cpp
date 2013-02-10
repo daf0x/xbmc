@@ -38,6 +38,8 @@
 #include "utils/TimeUtils.h"
 #include "utils/log.h"
 #include "cores/AudioEngine/AEFactory.h"
+#include "ApplicationMessenger.h"
+#include <boost/algorithm/string.hpp>
 #if defined(_WIN32)
   #include "Windows.h"
   #ifdef HAS_IRSERVERSUITE
@@ -60,6 +62,7 @@
 #define DEFAULT_PLAYCOUNT_MIN_TIME 10
 
 using namespace XFILE;
+using namespace std;
 
 #if defined(_WIN32)
 extern HWND g_hWnd;
@@ -101,11 +104,107 @@ bool CExternalPlayer::OpenFile(const CFileItem& file, const CPlayerOptions &opti
   try
   {
     m_bIsPlaying = true;
-    m_launchFilename = file.GetPath();
-    CLog::Log(LOGNOTICE, "%s: %s", __FUNCTION__, m_launchFilename.c_str());
+    CStdString filepath = file.GetPath();
+    CLog::Log(LOGNOTICE, "%s: %s", __FUNCTION__, filepath.c_str());
     Create();
 
-    return true;
+    CStdString archiveContent = "";
+    bool play_from_archive = m_player_args.find("{0}") == std::string::npos;
+    if (play_from_archive)
+    {
+      // Unwind archive names
+      CURL url(filepath);
+      CStdString protocol = url.GetProtocol();
+      if (protocol == "zip" || protocol == "rar"/* || protocol == "iso9660" ??*/)
+      {
+        filepath = url.GetHostName();
+        archiveContent = url.GetFileName();
+      }
+      if (protocol == "musicdb")
+        filepath = CMusicDatabaseFile::TranslateUrl(url);
+    }
+    ApplyCustomRegexpReplacers(filepath);
+
+  // Split the m_player_args into individual arguments for later passing to
+  // ExecOS(). This assumes that arguments do not have any spaces in them
+  // (reasonable since at this point no filenames should be present, and
+  // the executable has its own string: m_player_executable)
+  vector<CStdString> params;
+  params.push_back(m_player_executable);
+  vector<CStdString> split_m_player_args;
+  boost::split(split_m_player_args, m_player_args, boost::is_space(), boost::token_compress_on);
+  for(size_t i = 0; i < split_m_player_args.size(); ++i) {
+    if(!play_from_archive)
+    {
+      split_m_player_args[i].Replace("{0}", filepath);
+    }
+    else
+    {
+      split_m_player_args[i].Replace("{1}", filepath);
+      split_m_player_args[i].Replace("{2}", archiveContent);
+    }
+  }
+  params.insert(params.end(), split_m_player_args.begin(), split_m_player_args.end());
+  if (   (m_player_args.find("{0}") == std::string::npos)
+      && (m_player_args.find("{1}") == std::string::npos)
+      && (m_player_args.find("{2}") == std::string::npos) )
+  {
+    // Since none of {0}, {1} or {2} are present in the player's arguments,
+    // it follows that the above replacements did not add the filepath to
+    // the set of parameters. Do that now.
+    params.push_back(filepath);
+  }
+
+  if (m_warpcursor)
+  {
+    WarpCursor();
+  }
+
+  if (m_hidexbmc && !m_islauncher)
+  {
+    CLog::Log(LOGNOTICE, "%s: Hiding XBMC window", __FUNCTION__);
+    g_Windowing.Hide();
+  }
+#if defined(_WIN32)
+  else
+  {
+    LONG currentStyle = GetWindowLong(g_hWnd, GWL_EXSTYLE);
+    if (currentStyle & WS_EX_TOPMOST)
+    {
+      CLog::Log(LOGNOTICE, "%s: Lowering XBMC window", __FUNCTION__);
+      SetWindowPos(g_hWnd,HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOREDRAW);
+    }
+  }
+
+  CLog::Log(LOGDEBUG, "%s: Unlocking foreground window", __FUNCTION__);
+  LockSetForegroundWindow(LSFW_UNLOCK);
+#endif
+
+  m_playbackStartTime = XbmcThreads::SystemClockMillis();
+
+  /* Suspend AE temporarily so exclusive or hog-mode sinks */
+  /* don't block external player's access to audio device  */
+  if (!CAEFactory::Suspend())
+  {
+    CLog::Log(LOGNOTICE,"%s: Failed to suspend AudioEngine before launching external player", __FUNCTION__);
+  }
+
+  CLog::Log(LOGNOTICE, "%s: Player : %s", __FUNCTION__, m_player_executable.c_str());
+  CLog::Log(LOGNOTICE, "%s: File   : %s", __FUNCTION__, filepath.c_str());
+  CLog::Log(LOGNOTICE, "%s: Content: %s", __FUNCTION__, archiveContent.c_str());
+  CLog::Log(LOGNOTICE, "%s: Args   : %s", __FUNCTION__, m_player_args.c_str());
+  CLog::Log(LOGNOTICE, "%s: Start", __FUNCTION__);
+
+  BOOL ret = TRUE;
+#if defined(_WIN32)
+  ret = ExecuteAppW32(strFName.c_str(),strFArgs.c_str());
+#elif defined(TARGET_ANDROID)
+  ret = ExecuteAppAndroid(m_filename.c_str(), mainFile.c_str());
+#elif defined(_LINUX) || defined(TARGET_DARWIN_OSX)
+  ret = ExecuteAppLinux(params);
+#endif
+
+    return ret;
   }
   catch(...)
   {
@@ -127,7 +226,6 @@ bool CExternalPlayer::CloseFile()
     TerminateProcess(m_processInfo.hProcess, 1);
   }
 #endif
-
   return true;
 }
 
@@ -138,257 +236,76 @@ bool CExternalPlayer::IsPlaying() const
 
 void CExternalPlayer::Process()
 {
-  CStdString mainFile = m_launchFilename;
-  CStdString archiveContent = "";
-
-  if (m_args.find("{0}") == std::string::npos)
-  {
-    // Unwind archive names
-    CURL url(m_launchFilename);
-    CStdString protocol = url.GetProtocol();
-    if (protocol == "zip" || protocol == "rar"/* || protocol == "iso9660" ??*/ || protocol == "udf")
-    {
-      mainFile = url.GetHostName();
-      archiveContent = url.GetFileName();
-    }
-    if (protocol == "musicdb")
-      mainFile = CMusicDatabaseFile::TranslateUrl(url);
-    if (protocol == "bluray")
-    {
-      CURL base(url.GetHostName());
-      if(base.GetProtocol() == "udf")
-      {
-        mainFile = base.GetHostName(); /* image file */
-        archiveContent = base.GetFileName();
-      }
-      else
-        mainFile = URIUtils::AddFileToFolder(base.Get(), url.GetFileName());
-    }
-  }
-
-  if (m_filenameReplacers.size() > 0)
-  {
-    for (unsigned int i = 0; i < m_filenameReplacers.size(); i++)
-    {
-      std::vector<CStdString> vecSplit;
-      StringUtils::SplitString(m_filenameReplacers[i], " , ", vecSplit);
-
-      // something is wrong, go to next substitution
-      if (vecSplit.size() != 4)
-        continue;
-
-      CStdString strMatch = vecSplit[0];
-      strMatch.Replace(",,",",");
-      bool bCaseless = vecSplit[3].Find('i') > -1;
-      CRegExp regExp(bCaseless);
-
-      if (!regExp.RegComp(strMatch.c_str()))
-      { // invalid regexp - complain in logs
-        CLog::Log(LOGERROR, "%s: Invalid RegExp:'%s'", __FUNCTION__, strMatch.c_str());
-        continue;
-      }
-
-      if (regExp.RegFind(mainFile) > -1)
-      {
-        CStdString strPat = vecSplit[1];
-        strPat.Replace(",,",",");
-
-        if (!regExp.RegComp(strPat.c_str()))
-        { // invalid regexp - complain in logs
-          CLog::Log(LOGERROR, "%s: Invalid RegExp:'%s'", __FUNCTION__, strPat.c_str());
-          continue;
-        }
-
-        CStdString strRep = vecSplit[2];
-        strRep.Replace(",,",",");
-        bool bGlobal = vecSplit[3].Find('g') > -1;
-        bool bStop = vecSplit[3].Find('s') > -1;
-        int iStart = 0;
-        while ((iStart = regExp.RegFind(mainFile, iStart)) > -1)
-        {
-          int iLength = regExp.GetFindLen();
-          mainFile = mainFile.Left(iStart) + regExp.GetReplaceString(strRep.c_str()).c_str() + mainFile.Mid(iStart+iLength);
-          if (!bGlobal)
-            break;
-        }
-        CLog::Log(LOGINFO, "%s: File matched:'%s' (RE='%s',Rep='%s') new filename:'%s'.", __FUNCTION__, strMatch.c_str(), strPat.c_str(), strRep.c_str(), mainFile.c_str());
-        if (bStop) break;
-      }
-    }
-  }
-
-  CLog::Log(LOGNOTICE, "%s: Player : %s", __FUNCTION__, m_filename.c_str());
-  CLog::Log(LOGNOTICE, "%s: File   : %s", __FUNCTION__, mainFile.c_str());
-  CLog::Log(LOGNOTICE, "%s: Content: %s", __FUNCTION__, archiveContent.c_str());
-  CLog::Log(LOGNOTICE, "%s: Args   : %s", __FUNCTION__, m_args.c_str());
-  CLog::Log(LOGNOTICE, "%s: Start", __FUNCTION__);
-
-  // make sure we surround the arguments with quotes where necessary
-  CStdString strFName;
-  CStdString strFArgs;
-#if defined(_WIN32)
-  // W32 batch-file handline
-  if (m_filename.Right(4) == ".bat" || m_filename.Right(4) == ".cmd")
-  {
-    // MSDN says you just need to do this, but cmd's handing of spaces and
-    // quotes is soo broken it seems to work much better if you just omit
-    // lpApplicationName and enclose the module in lpCommandLine in quotes
-    //strFName = "cmd.exe";
-    //strFArgs = "/c ";
-  }
-  else
-#endif
-    strFName = m_filename;
-
-  strFArgs.append("\"");
-  strFArgs.append(m_filename);
-  strFArgs.append("\" ");
-  strFArgs.append(m_args);
-
-  int nReplaced = strFArgs.Replace("{0}", mainFile);
-
-  if (!nReplaced)
-    nReplaced = strFArgs.Replace("{1}", mainFile) + strFArgs.Replace("{2}", archiveContent);
-
-  if (!nReplaced)
-  {
-    strFArgs.append(" \"");
-    strFArgs.append(mainFile);
-    strFArgs.append("\"");
-  }
-
-#if defined(_WIN32)
-  if (m_warpcursor)
-  {
-    GetCursorPos(&m_ptCursorpos);
-    int x = 0;
-    int y = 0;
-    switch (m_warpcursor)
-    {
-      case WARP_BOTTOM_RIGHT:
-        x = GetSystemMetrics(SM_CXSCREEN);
-      case WARP_BOTTOM_LEFT:
-        y = GetSystemMetrics(SM_CYSCREEN);
-        break;
-      case WARP_TOP_RIGHT:
-        x = GetSystemMetrics(SM_CXSCREEN);
-        break;
-      case WARP_CENTER:
-        x = GetSystemMetrics(SM_CXSCREEN) / 2;
-        y = GetSystemMetrics(SM_CYSCREEN) / 2;
-        break;
-    }
-    CLog::Log(LOGNOTICE, "%s: Warping cursor to (%d,%d)", __FUNCTION__, x, y);
-    SetCursorPos(x,y);
-  }
-
-  LONG currentStyle = GetWindowLong(g_hWnd, GWL_EXSTYLE);
-#endif
-
-  if (m_hidexbmc && !m_islauncher)
-  {
-    CLog::Log(LOGNOTICE, "%s: Hiding XBMC window", __FUNCTION__);
-    g_Windowing.Hide();
-  }
-#if defined(_WIN32)
-  else if (currentStyle & WS_EX_TOPMOST)
-  {
-    CLog::Log(LOGNOTICE, "%s: Lowering XBMC window", __FUNCTION__);
-    SetWindowPos(g_hWnd,HWND_BOTTOM,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOREDRAW);
-  }
-
-  CLog::Log(LOGDEBUG, "%s: Unlocking foreground window", __FUNCTION__);
-  LockSetForegroundWindow(LSFW_UNLOCK);
-#endif
-
-  m_playbackStartTime = XbmcThreads::SystemClockMillis();
-
-  /* Suspend AE temporarily so exclusive or hog-mode sinks */
-  /* don't block external player's access to audio device  */
-  if (!CAEFactory::Suspend())
-  {
-    CLog::Log(LOGNOTICE,"%s: Failed to suspend AudioEngine before launching external player", __FUNCTION__);
-  }
-
-
-  BOOL ret = TRUE;
-#if defined(_WIN32)
-  ret = ExecuteAppW32(strFName.c_str(),strFArgs.c_str());
-#elif defined(TARGET_ANDROID)
-  ret = ExecuteAppAndroid(m_filename.c_str(), mainFile.c_str());
-#elif defined(_LINUX) || defined(TARGET_DARWIN_OSX)
-  ret = ExecuteAppLinux(strFArgs.c_str());
-#endif
-  int64_t elapsedMillis = XbmcThreads::SystemClockMillis() - m_playbackStartTime;
-
-  if (ret && (m_islauncher || elapsedMillis < LAUNCHER_PROCESS_TIME))
-  {
-    if (m_hidexbmc)
-    {
-      CLog::Log(LOGNOTICE, "%s: XBMC cannot stay hidden for a launcher process", __FUNCTION__);
-      g_Windowing.Show(false);
-    }
-
-    {
-      CSingleLock lock(g_graphicsContext);
-      m_dialog = (CGUIDialogOK *)g_windowManager.GetWindow(WINDOW_DIALOG_OK);
-      m_dialog->SetHeading(23100);
-      m_dialog->SetLine(1, 23104);
-      m_dialog->SetLine(2, 23105);
-      m_dialog->SetLine(3, 23106);
-    }
-
-    if (!m_bAbortRequest) m_dialog->DoModal();
-  }
-
-  m_bIsPlaying = false;
-  CLog::Log(LOGNOTICE, "%s: Stop", __FUNCTION__);
-
-#if defined(_WIN32)
-  g_Windowing.Restore();
-
-  if (currentStyle & WS_EX_TOPMOST)
-  {
-    CLog::Log(LOGNOTICE, "%s: Showing XBMC window TOPMOST", __FUNCTION__);
-    SetWindowPos(g_hWnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW);
-    SetForegroundWindow(g_hWnd);
-  }
-  else
-#endif
-  {
-    CLog::Log(LOGNOTICE, "%s: Showing XBMC window", __FUNCTION__);
-    g_Windowing.Show();
-  }
-
-#if defined(_WIN32)
-  if (m_warpcursor)
-  {
-    m_xPos = 0;
-    m_yPos = 0;
-    if (&m_ptCursorpos != 0)
-    {
-      m_xPos = (m_ptCursorpos.x);
-      m_yPos = (m_ptCursorpos.y);
-    }
-    CLog::Log(LOGNOTICE, "%s: Restoring cursor to (%d,%d)", __FUNCTION__, m_xPos, m_yPos);
-    SetCursorPos(m_xPos,m_yPos);
-  }
-#endif
-
-  /* Resume AE processing of XBMC native audio */
-  if (!CAEFactory::Resume())
-  {
-    CLog::Log(LOGFATAL, "%s: Failed to restart AudioEngine after return from external player",__FUNCTION__);
-  }
-
-  // We don't want to come back to an active screensaver
-  g_application.ResetScreenSaver();
-  g_application.WakeUpScreenSaverAndDPMS();
-
-  if (!ret || (m_playOneStackItem && g_application.CurrentFileItem().IsStack()))
-    m_callback.OnPlayBackStopped();
-  else
-    m_callback.OnPlayBackEnded();
+//  int64_t elapsedMillis = XbmcThreads::SystemClockMillis() - m_playbackStartTime;
+//
+//  if (ret && (m_islauncher || elapsedMillis < LAUNCHER_PROCESS_TIME))
+//  {
+//    if (m_hidexbmc)
+//    {
+//      CLog::Log(LOGNOTICE, "%s: XBMC cannot stay hidden for a launcher process", __FUNCTION__);
+//      g_Windowing.Show(false);
+//    }
+//
+//    {
+//      CSingleLock lock(g_graphicsContext);
+//      m_dialog = (CGUIDialogOK *)g_windowManager.GetWindow(WINDOW_DIALOG_OK);
+//      m_dialog->SetHeading(23100);
+//      m_dialog->SetLine(1, 23104);
+//      m_dialog->SetLine(2, 23105);
+//      m_dialog->SetLine(3, 23106);
+//    }
+//
+//    if (!m_bAbortRequest) m_dialog->DoModal();
+//  }
+//
+//  m_bIsPlaying = false;
+//  CLog::Log(LOGNOTICE, "%s: Stop", __FUNCTION__);
+//
+//#if defined(_WIN32)
+//  g_Windowing.Restore();
+//
+//  if (currentStyle & WS_EX_TOPMOST)
+//  {
+//    CLog::Log(LOGNOTICE, "%s: Showing XBMC window TOPMOST", __FUNCTION__);
+//    SetWindowPos(g_hWnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW);
+//    SetForegroundWindow(g_hWnd);
+//  }
+//  else
+//#endif
+//  {
+//    CLog::Log(LOGNOTICE, "%s: Showing XBMC window", __FUNCTION__);
+//    g_Windowing.Show();
+//  }
+//
+//#if defined(_WIN32)
+//  if (m_warpcursor)
+//  {
+//    m_xPos = 0;
+//    m_yPos = 0;
+//    if (&m_ptCursorpos != 0)
+//    {
+//      m_xPos = (m_ptCursorpos.x);
+//      m_yPos = (m_ptCursorpos.y);
+//    }
+//    CLog::Log(LOGNOTICE, "%s: Restoring cursor to (%d,%d)", __FUNCTION__, m_xPos, m_yPos);
+//    SetCursorPos(m_xPos,m_yPos);
+//  }
+//#endif
+//
+//  /* Resume AE processing of XBMC native audio */
+//  if (!CAEFactory::Resume())
+//  {
+//    CLog::Log(LOGFATAL, __FUNCTION__, "Failed to restart AudioEngine after return from external player");
+//  }
+//
+//  // We don't want to come back to an active screensaver
+//  g_application.ResetScreenSaver();
+//  g_application.WakeUpScreenSaverAndDPMS();
+//
+//  if (!ret || (m_playOneStackItem && g_application.CurrentFileItem().IsStack()))
+//    m_callback.OnPlayBackStopped();
+//  else
+//    m_callback.OnPlayBackEnded();
 }
 
 #if defined(_WIN32)
@@ -448,10 +365,43 @@ BOOL CExternalPlayer::ExecuteAppW32(const char* strPath, const char* strSwitches
 }
 #endif
 
-#if !defined(TARGET_ANDROID) && (defined(_LINUX) || defined(TARGET_DARWIN_OSX))
-BOOL CExternalPlayer::ExecuteAppLinux(const char* strSwitches)
+void CExternalPlayer::WarpCursor()
 {
-  CLog::Log(LOGNOTICE, "%s: %s", __FUNCTION__, strSwitches);
+#if defined(_WIN32)
+  GetCursorPos(&m_ptCursorpos);
+  int x = 0;
+  int y = 0;
+  switch (m_warpcursor)
+  {
+    case WARP_BOTTOM_RIGHT:
+      x = GetSystemMetrics(SM_CXSCREEN);
+    case WARP_BOTTOM_LEFT:
+      y = GetSystemMetrics(SM_CYSCREEN);
+      break;
+    case WARP_TOP_RIGHT:
+      x = GetSystemMetrics(SM_CXSCREEN);
+      break;
+    case WARP_CENTER:
+      x = GetSystemMetrics(SM_CXSCREEN) / 2;
+      y = GetSystemMetrics(SM_CYSCREEN) / 2;
+      break;
+  }
+  CLog::Log(LOGNOTICE, "%s: Warping cursor to (%d,%d)", __FUNCTION__, x, y);
+  SetCursorPos(x,y);
+#endif
+}
+
+#if !defined(TARGET_ANDROID) && (defined(_LINUX) || defined(TARGET_DARWIN_OSX))
+BOOL CExternalPlayer::ExecuteAppLinux(const vector<CStdString>& params)
+{
+  if(params.size() < 1) // We need at least 1 parameter (the commandname)
+    return false;
+
+  CStdString strSwitches = params[0];
+  for(size_t i = 1 ; i < params.size(); ++i)
+    strSwitches = strSwitches + " " + params[i];
+  CLog::Log(LOGNOTICE, "%s: %s", __FUNCTION__, strSwitches.c_str());
+
 #ifdef HAS_LIRC
   bool remoteused = g_RemoteControl.IsInUse();
   g_RemoteControl.Disconnect();
@@ -623,10 +573,10 @@ bool CExternalPlayer::SetPlayerState(CStdString state)
 
 bool CExternalPlayer::Initialize(TiXmlElement* pConfig)
 {
-  XMLUtils::GetString(pConfig, "filename", m_filename);
-  if (m_filename.length() > 0)
+  XMLUtils::GetString(pConfig, "filename", m_player_executable);
+  if (m_player_executable.length() > 0)
   {
-    CLog::Log(LOGNOTICE, "ExternalPlayer Filename: %s", m_filename.c_str());
+    CLog::Log(LOGNOTICE, "ExternalPlayer Filename: %s", m_player_executable.c_str());
   }
   else
   {
@@ -636,7 +586,7 @@ bool CExternalPlayer::Initialize(TiXmlElement* pConfig)
     return false;
   }
 
-  XMLUtils::GetString(pConfig, "args", m_args);
+  XMLUtils::GetString(pConfig, "args", m_player_args);
   XMLUtils::GetBoolean(pConfig, "playonestackitem", m_playOneStackItem);
   XMLUtils::GetBoolean(pConfig, "islauncher", m_islauncher);
   XMLUtils::GetBoolean(pConfig, "hidexbmc", m_hidexbmc);
@@ -644,7 +594,7 @@ bool CExternalPlayer::Initialize(TiXmlElement* pConfig)
   {
 #ifdef _WIN32
     // Default depends on whether player is a batch file
-    m_hideconsole = m_filename.Right(4) == ".bat";
+    m_hideconsole = m_player_executable.Right(4) == ".bat";
 #endif
   }
 
@@ -756,5 +706,59 @@ void CExternalPlayer::GetCustomRegexpReplacers(TiXmlElement *pRootElement,
     }
 
     pReplacer = pReplacer->NextSiblingElement("replacer");
+  }
+}
+
+void CExternalPlayer::ApplyCustomRegexpReplacers(CStdString& filename)
+{
+  if (m_filenameReplacers.size() > 0)
+  {
+    for (unsigned int i = 0; i < m_filenameReplacers.size(); i++)
+    {
+      std::vector<CStdString> vecSplit;
+      StringUtils::SplitString(m_filenameReplacers[i], " , ", vecSplit);
+
+      // something is wrong, go to next substitution
+      if (vecSplit.size() != 4)
+        continue;
+
+      CStdString strMatch = vecSplit[0];
+      strMatch.Replace(",,",",");
+      bool bCaseless = vecSplit[3].Find('i') > -1;
+      CRegExp regExp(bCaseless);
+
+      if (!regExp.RegComp(strMatch.c_str()))
+      { // invalid regexp - complain in logs
+        CLog::Log(LOGERROR, "%s: Invalid RegExp:'%s'", __FUNCTION__, strMatch.c_str());
+        continue;
+      }
+
+      if (regExp.RegFind(filename) > -1)
+      {
+        CStdString strPat = vecSplit[1];
+        strPat.Replace(",,",",");
+
+        if (!regExp.RegComp(strPat.c_str()))
+        { // invalid regexp - complain in logs
+          CLog::Log(LOGERROR, "%s: Invalid RegExp:'%s'", __FUNCTION__, strPat.c_str());
+          continue;
+        }
+
+        CStdString strRep = vecSplit[2];
+        strRep.Replace(",,",",");
+        bool bGlobal = vecSplit[3].Find('g') > -1;
+        bool bStop = vecSplit[3].Find('s') > -1;
+        int iStart = 0;
+        while ((iStart = regExp.RegFind(filename, iStart)) > -1)
+        {
+          int iLength = regExp.GetFindLen();
+          filename = filename.Left(iStart) + regExp.GetReplaceString(strRep.c_str()) + filename.Mid(iStart+iLength);
+          if (!bGlobal)
+            break;
+        }
+        CLog::Log(LOGINFO, "%s: File matched:'%s' (RE='%s',Rep='%s') new filename:'%s'.", __FUNCTION__, strMatch.c_str(), strPat.c_str(), strRep.c_str(), filename.c_str());
+        if (bStop) break;
+      }
+    }
   }
 }

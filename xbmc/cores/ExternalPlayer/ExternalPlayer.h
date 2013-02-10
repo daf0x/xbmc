@@ -88,11 +88,13 @@ public:
 #elif defined(TARGET_ANDROID)
   virtual BOOL ExecuteAppAndroid(const char* strSwitches,const char* strPath);
 #elif defined(_LINUX)
-  virtual BOOL ExecuteAppLinux(const char* strSwitches);
+  virtual BOOL ExecuteAppLinux(const std::vector<CStdString>& params);
 #endif
 
 private:
   void GetCustomRegexpReplacers(TiXmlElement *pRootElement, CStdStringArray& settings);
+  void ApplyCustomRegexpReplacers(CStdString& filename);
+  void WarpCursor();
   virtual void Process();
 
   bool m_bAbortRequest;
@@ -103,7 +105,6 @@ private:
   int m_speed;
   int m_totalTime;
   int m_time;
-  CStdString m_launchFilename;
   HWND m_hwndXbmc; 
 #if defined(_WIN32)
   POINT m_ptCursorpos;
@@ -112,8 +113,8 @@ private:
   CGUIDialogOK* m_dialog;
   int m_xPos;
   int m_yPos;
-  CStdString m_filename;
-  CStdString m_args;
+  CStdString m_player_executable;
+  CStdString m_player_args;
   bool m_hideconsole;
   bool m_hidexbmc;
   bool m_islauncher;

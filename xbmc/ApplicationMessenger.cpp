@@ -532,24 +532,12 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
       break;
 
     case TMSG_EXECUTE_OS:
-      /* Suspend AE temporarily so exclusive or hog-mode sinks */
-      /* don't block external player's access to audio device  */
-      if (!CAEFactory::Suspend())
-      {
-        CLog::Log(LOGNOTICE, "%s: Failed to suspend AudioEngine before launching external program",__FUNCTION__);
-      }
 #if defined( _LINUX) && !defined(TARGET_DARWIN)
       assert( pMsg->pidWatcher.get() != 0 );
       CUtil::Command(pMsg->params, pMsg->pidWatcher);
 #elif defined(_WIN32)
       CWIN32Util::XBMCShellExecute(pMsg->params[0].c_str(), (pMsg->dwParam1 == 1));
 #endif
-      /* Resume AE processing of XBMC native audio */
-      if (!CAEFactory::Resume())
-      {
-        CLog::Log(LOGFATAL, "%s: Failed to restart AudioEngine after return from external player",__FUNCTION__);
-      }
-      break;
 
     case TMSG_EXECUTE_SCRIPT:
 #ifdef HAS_PYTHON
